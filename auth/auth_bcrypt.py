@@ -1,10 +1,17 @@
 import sqlite3
 import bcrypt
+from auth.utils import validar_forca_senha, checar_bloqueio, registrar_tentativa_falha, resetar_tentativas
 #Conexao com o bd.
 def conectar():
     return sqlite3.connect("users.db")
 #Registro de ususario com os dados, agora com hash e salt aplicados na senha.
 def registrar(username, password):
+    # Validacao introduzida para nao permitir senhas com baixa complexidade (Melhoria 2).
+    valida, msg = validar_forca_senha(password)
+    if not valida:
+        print(f"Erro: {msg}")
+        return
+
     conn = conectar()
     cursor = conn.cursor()
     #Utilizacao do bcrypt
@@ -33,25 +40,37 @@ def login(username, password):
     conn = conectar()
     cursor = conn.cursor()
 
+    # Previne que contas sendo atacadas por forca bruta sejam sequer roteadas ao banco (Melhoria 1).
+    bloqueado, msg = checar_bloqueio(cursor, username)
+    if bloqueado:
+        print(msg)
+        conn.close()
+        return False
+
     cursor.execute("""
     SELECT password FROM usuarios
     WHERE username=?
     """, (username,))
 
     result = cursor.fetchone()
-    conn.close()
     #Trata o caso de que se o ususario nao estiver no bd, o sistema notifica.
     if result is None:
         print("Usuário não encontrado!")
+        conn.close()
         return False
 
     senha_hash = result[0]
     #Se a senha for compativel, ok, se nao, erro notificado.
     if bcrypt.checkpw(password.encode(), senha_hash):
+        # Reseta os contadores de erro na conta para limpar o status dela.
+        resetar_tentativas(cursor, conn, username)
         print("Login OK")
+        conn.close()
         return True
     else:
-        print("Senha incorreta!")
+        # Incrementa +1 erro no contador e trava temporariamente a conta no 3o erro.
+        registrar_tentativa_falha(cursor, conn, username)
+        conn.close()
         return False
 
 
