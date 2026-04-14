@@ -2,6 +2,7 @@ import time
 import hashlib
 import bcrypt
 import os
+import pyotp
 
 senha = "123456"
 
@@ -27,7 +28,25 @@ print("SHA256 + Salt tempo:", end - start)
 # ---------------- BCRYPT ----------------
 start = time.time()
 for _ in range(100):
-    bcrypt.hashpw(senha.encode(), bcrypt.gensalt())
+    senha_hash = bcrypt.hashpw(senha.encode(), bcrypt.gensalt())
+    bcrypt.checkpw(senha.encode(), senha_hash)
 end = time.time()
 
 print("Bcrypt tempo:", end - start)
+
+
+# ---------------- 2FA + BCRYPT ----------------
+secret = pyotp.random_base32()
+totp = pyotp.TOTP(secret)
+
+start = time.time()
+for _ in range(100):
+    senha_hash = bcrypt.hashpw(senha.encode(), bcrypt.gensalt())
+    bcrypt.checkpw(senha.encode(), senha_hash)
+
+    codigo = totp.now()
+    totp.verify(codigo)
+
+end = time.time()
+
+print("2FA + Bcrypt tempo:", end - start)

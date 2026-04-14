@@ -1,6 +1,11 @@
 import sqlite3
 import bcrypt
 import pyotp
+from datetime import datetime, timedelta
+
+LIMITE_TENTATIVAS = 3
+TEMPO_BLOQUEIO_MINUTOS = 1
+
 
 def conectar():
     return sqlite3.connect("users.db")
@@ -17,14 +22,13 @@ def registrar(username, password):
 
     try:
         cursor.execute("""
-        INSERT INTO usuarios (username, password, otp_secret)
-        VALUES (?, ?, ?)
+        INSERT INTO usuarios (username, password, otp_secret, tentativas_falhas, bloqueado_ate)
+        VALUES (?, ?, ?, 0, NULL)
         """, (username, senha_hash, otp_secret))
 
         conn.commit()
         print("Usuário cadastrado com sucesso!")
 
-        # Mostra para o usuario configurar
         print("\n=== CONFIGURAÇÃO 2FA ===")
         print("Adicione este código no Google Authenticator:")
         print(f"Chave secreta: {otp_secret}")
@@ -36,43 +40,112 @@ def registrar(username, password):
         conn.close()
 
 
-def login(username, password):
+def login(username, password, codigo=None):
     conn = conectar()
     cursor = conn.cursor()
 
     cursor.execute("""
-    SELECT password, otp_secret FROM usuarios
+    SELECT password, otp_secret, tentativas_falhas, bloqueado_ate
+    FROM usuarios
     WHERE username=?
     """, (username,))
 
     result = cursor.fetchone()
-    conn.close()
 
     if result is None:
+        conn.close()
         print("Usuário não encontrado!")
         return False
 
-    senha_hash, otp_secret = result
+    senha_hash, otp_secret, tentativas_falhas, bloqueado_ate = result
 
-    # verificao de senha
+    # Verifica se está bloqueado
+    if bloqueado_ate is not None:
+        horario_bloqueio = datetime.fromisoformat(bloqueado_ate)
+        if datetime.now() < horario_bloqueio:
+            conn.close()
+            print(f"Usuário bloqueado até {bloqueado_ate}")
+            return False
+        else:
+            # desbloqueia automaticamente se o tempo passou
+            cursor.execute("""
+            UPDATE usuarios
+            SET tentativas_falhas = 0, bloqueado_ate = NULL
+            WHERE username=?
+            """, (username,))
+            conn.commit()
+            tentativas_falhas = 0
+            bloqueado_ate = None
+
+    # Verifica senha
     if not bcrypt.checkpw(password.encode(), senha_hash):
-        print("Senha incorreta!")
-        return False
+        tentativas_falhas += 1
+
+        if tentativas_falhas >= LIMITE_TENTATIVAS:
+            bloqueado_ate = (datetime.now() + timedelta(minutes=TEMPO_BLOQUEIO_MINUTOS)).isoformat()
+            cursor.execute("""
+            UPDATE usuarios
+            SET tentativas_falhas=?, bloqueado_ate=?
+            WHERE username=?
+            """, (tentativas_falhas, bloqueado_ate, username))
+            conn.commit()
+            conn.close()
+            print(f"Senha incorreta! Usuário bloqueado até {bloqueado_ate}")
+            return False
+        else:
+            cursor.execute("""
+            UPDATE usuarios
+            SET tentativas_falhas=?
+            WHERE username=?
+            """, (tentativas_falhas, username))
+            conn.commit()
+            conn.close()
+            print(f"Senha incorreta! Tentativa {tentativas_falhas} de {LIMITE_TENTATIVAS}.")
+            return False
 
     # Etapa 2FA
     totp = pyotp.TOTP(otp_secret)
 
-    codigo = input("Digite o código 2FA: ")
+    if codigo is None:
+        codigo = input("Digite o código 2FA: ")
 
-    if totp.verify(codigo):
-        print("Login completo (2FA OK)!")
-        return True
-    else:
-        print("Código 2FA inválido!")
-        return False
+    if not totp.verify(codigo):
+        tentativas_falhas += 1
 
+        if tentativas_falhas >= LIMITE_TENTATIVAS:
+            bloqueado_ate = (datetime.now() + timedelta(minutes=TEMPO_BLOQUEIO_MINUTOS)).isoformat()
+            cursor.execute("""
+            UPDATE usuarios
+            SET tentativas_falhas=?, bloqueado_ate=?
+            WHERE username=?
+            """, (tentativas_falhas, bloqueado_ate, username))
+            conn.commit()
+            conn.close()
+            print(f"Código 2FA inválido! Usuário bloqueado até {bloqueado_ate}")
+            return False
+        else:
+            cursor.execute("""
+            UPDATE usuarios
+            SET tentativas_falhas=?
+            WHERE username=?
+            """, (tentativas_falhas, username))
+            conn.commit()
+            conn.close()
+            print(f"Código 2FA inválido! Tentativa {tentativas_falhas} de {LIMITE_TENTATIVAS}.")
+            return False
 
-# MENU
+    # Se tudo estiver certo, zera tentativas
+    cursor.execute("""
+    UPDATE usuarios
+    SET tentativas_falhas = 0, bloqueado_ate = NULL
+    WHERE username=?
+    """, (username,))
+    conn.commit()
+    conn.close()
+
+    print("Login completo (2FA OK)!")
+    return True
+
 
 def menu():
     while True:
