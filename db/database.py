@@ -10,6 +10,7 @@ def criar_banco():
         username TEXT UNIQUE,
         password TEXT,
         salt TEXT,
+        otp_secret TEXT
         -- Colunas adicionadas para tratar o controle de bloqueio de rate limits por tentativas sucessivas falsas.
         tentativas_falhas INTEGER DEFAULT 0,
         bloqueado_ate TEXT

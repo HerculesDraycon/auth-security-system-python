@@ -2,6 +2,7 @@ from auth.auth_plain import menu as menu_plain
 from auth.auth_md5 import menu as menu_md5
 from auth.auth_salt import menu as menu_salt
 from auth.auth_bcrypt import menu as menu_bcrypt
+from auth.twoFA import menu as t_fa
 
 def main():
     while True:
@@ -10,7 +11,8 @@ def main():
         print("2 - MD5")
         print("3 - Salt")
         print("4 - BCRYPT")
-        print("5 - Sair")
+        print("5 - 2FA + BCRYPT")
+        print("6 - Sair")
 
         op = input("Escolha: ")
 
@@ -25,6 +27,12 @@ def main():
 
         elif op == "4":
             menu_bcrypt()
+
+        elif op == "5":
+            t_fa()
+
+        elif op == "6":
+            break
 
         else:
             print("Opção inválida!")
